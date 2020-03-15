@@ -17,6 +17,7 @@ final case class Edge(r1: Room, r2: Room) {
   }
 }
 final case class Game(
+    lang: Lang,
     seed: Seed,
     map: Set[Edge],
     wumpusRoom: Room,
@@ -25,13 +26,17 @@ final case class Game(
     batRooms: Set[Room],
     playerRoom: Room,
     arrowTotal: Int
-)
+) {
+  val nonEmptyRooms: Set[Room] =
+    Set(playerRoom, wumpusRoom) ++ pitRooms ++ batRooms
+}
 object Game {
-  def init(s: Seed): Game = {
-    val shuffled = Random.shuffle(Room.all).run(s).value._2
+  def init(lang: Lang, s: Seed): Game = {
+    val (newSeed, shuffled) = Random.shuffle(Room.all).run(s).value
     val List(wumpusRoom, pit1, pit2, bat1, bat2, player) = shuffled.take(6)
     Game(
-      seed = s,
+      lang = lang,
+      seed = newSeed,
       map = GameMap.edges,
       wumpusRoom = wumpusRoom,
       wumpusAlive = true,

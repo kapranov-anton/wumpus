@@ -5,8 +5,7 @@ import org.scalacheck.Prop.forAll
 
 object GameSpec extends Properties("Game") {
   property("init") = forAll { (a: Long) =>
-    val g = Game.init(Seed(a))
-    val rooms = Set(g.playerRoom, g.wumpusRoom) ++ g.pitRooms ++ g.batRooms
-    rooms.size == 6
+    val g = Game.init(Lang.en, Seed(a))
+    g.nonEmptyRooms.size == 6
   }
 }

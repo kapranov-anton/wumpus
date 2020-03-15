@@ -23,20 +23,26 @@ object Main extends IOApp {
     val hasWumpus = adj.contains(g.wumpusRoom)
     val rooms = adj.map(_.value.toString).mkString(", ")
     List(
-      if (hasBats) "bats nearby" else "",
-      if (hasPits) "pits nearby" else "",
-      if (hasWumpus) "wumpus nearby" else "",
-      s"rooms: $rooms",
-      s"arrows: ${g.arrowTotal}"
+      if (hasBats) g.lang.batsNearby else "",
+      if (hasPits) g.lang.pitNearby else "",
+      if (hasWumpus) g.lang.wumpusNearby else "",
+      s"${g.lang.roomsNearby}: $rooms",
+      s"${g.lang.arrows}: ${g.arrowTotal}"
     ).filter(_.nonEmpty).mkString("\n")
   }
 
-  def askDirection: IO[Option[Room]] =
-    IO(StdIn.readLine("what direction: ")).map { input =>
+  def askDirection(l: Lang): IO[Option[Room]] =
+    IO(StdIn.readLine(s"${l.whatDirection}: ")).map { input =>
       input.toIntOption.map(Room.apply)
     }
 
   def onQuit: IO[Unit] = IO.unit
+
+  def vacantRoom(game: Game): (Seed, Option[Room]) = {
+    val vacantRooms = Room.all.toSet.removedAll(game.nonEmptyRooms).toList
+    val (seed, rooms) = Random.shuffle(vacantRooms).run(game.seed).value
+    seed -> rooms.headOption
+  }
 
   def update(
       game: Game,
@@ -46,13 +52,45 @@ object Main extends IOApp {
     (command, maybeDirection) match {
       case (PlayerCommand.Move, None) => game
       case (PlayerCommand.Move, Some(direction)) =>
-        game.copy(playerRoom = direction)
+        if (game.batRooms.contains(direction)) {
+          val (seed, maybeRoom) = vacantRoom(game)
+          val newRoom = maybeRoom.getOrElse(direction)
+          game.copy(seed = seed, playerRoom = newRoom)
+        } else
+          game.copy(playerRoom = direction)
       case (PlayerCommand.Shoot, None) => game
       case (PlayerCommand.Shoot, Some(direction)) =>
         if (direction === game.wumpusRoom) game.copy(wumpusAlive = false)
-        else game.copy(arrowTotal = game.arrowTotal - 1)
+        else {
+          val (seed, maybeRoom) = vacantRoom(game)
+          val newRoom = maybeRoom.getOrElse(game.wumpusRoom)
+          game.copy(
+            seed = seed,
+            wumpusRoom = newRoom,
+            arrowTotal = game.arrowTotal - 1
+          )
+        }
       case (PlayerCommand.Quit, _)    => game
       case (PlayerCommand.Unknown, _) => game
+    }
+
+  def drawTurnResult(
+      game: Game,
+      command: PlayerCommand,
+      maybeDirection: Option[Room]
+  ) =
+    (command, maybeDirection) match {
+      case (PlayerCommand.Move, None)  => game.lang.unknownDirection
+      case (PlayerCommand.Shoot, None) => game.lang.unknownDirection
+      case (PlayerCommand.Move, Some(direction)) =>
+        if (direction === game.playerRoom)
+          s"${game.lang.moveTo} ${game.playerRoom.value}"
+        else
+          s"${game.lang.batsMoveYou} ${game.playerRoom.value}"
+      case (PlayerCommand.Shoot, Some(direction)) =>
+        game.lang.missed
+      case (PlayerCommand.Quit, _)    => game.lang.bye
+      case (PlayerCommand.Unknown, _) => game.lang.unknownCommand
     }
 
   /**
@@ -64,28 +102,32 @@ object Main extends IOApp {
     */
   def loop(g: Game): IO[Unit] =
     for {
-      input <- IO(StdIn.readLine("shoot or move [s/m/q]: "))
+      _ <- IO(println("-" * 80))
+      input <- IO(StdIn.readLine(s"${g.lang.shootOrMove} [s/m/q]: "))
       command = PlayerCommand.fromString(input)
-      _ <- IO(println(s">> $command <<"))
       maybeDirection <- if (command === PlayerCommand.Move || command === PlayerCommand.Shoot) {
         val adj = adjacentRooms(g)
-        askDirection.map(_.filter(adj.contains))
+        askDirection(g.lang).map(_.filter(adj.contains))
       } else
         IO.pure(None)
-      _ <- IO(println(maybeDirection))
       newGame = update(g, command, maybeDirection)
-      _ <- if (!newGame.wumpusAlive) IO(println("you win"))
-      else if (newGame.arrowTotal === 0 || newGame.pitRooms.contains(
-                 newGame.playerRoom
-               ) || newGame.wumpusRoom === newGame.playerRoom)
-        IO(println("you died"))
+      _ <- if (!newGame.wumpusAlive) IO(println(g.lang.win))
+      else if (newGame.wumpusRoom === newGame.playerRoom)
+        IO(println(g.lang.wumpusKill))
+      else if (newGame.pitRooms.contains(newGame.playerRoom))
+        IO(println(g.lang.fell))
+      else if (newGame.arrowTotal === 0)
+        IO(println(g.lang.outOfArrows))
       else
-        IO(println(drawStatus(newGame)))
+        IO(println(drawTurnResult(newGame, command, maybeDirection))) *>
+          IO(println(drawStatus(newGame))) *>
+          (if (command =!= PlayerCommand.Quit) loop(newGame) else IO.unit)
     } yield ()
 
   val program = for {
     start <- Clock[IO].monotonic(duration.MILLISECONDS)
-    g = Game.init(Seed(start))
+    g = Game.init(Lang.ru, Seed(start))
+    _ <- IO(println(s"${g.lang.intro} ${g.playerRoom.value}"))
     _ <- IO(println(drawStatus(g)))
     _ <- loop(g)
   } yield ExitCode.Success
