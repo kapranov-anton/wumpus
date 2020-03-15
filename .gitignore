@@ -1,0 +1,6 @@
+target/
+.idea
+backend.image
+.metals/
+.bloop/
+project/metals.sbt
